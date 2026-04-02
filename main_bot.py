@@ -2,117 +2,183 @@ import telebot
 from telebot.types import ReplyKeyboardMarkup
 
 from config import *
-from database import add_user, get_user_bots, delete_bot, get_all_bots, add_channel, get_channels, remove_channel
+from database import *
 from bot_manager import create_bot, stop_all_bots, start_all_bots
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
 # =========================
-# 🏁 START
+# 🔒 FORCE JOIN CHECK
+# =========================
+
+def check_force_join(user_id):
+    if not FORCE_JOIN_ON:
+        return True
+
+    chs = get_channels()
+
+    for ch in chs:
+        try:
+            member = bot.get_chat_member(ch["channel_id"], user_id)
+            if member.status not in ["member", "administrator", "creator"]:
+                return False
+        except:
+            return False
+
+    return True
+
+# =========================
+# 🚀 START MAIN BOT
 # =========================
 
 def start_main_bot():
     print("✅ Main Bot Running...")
 
+    # =========================
+    # /START
+    # =========================
     @bot.message_handler(commands=['start'])
     def start(msg):
         user_id = msg.from_user.id
         add_user(user_id)
 
+        # 🔒 Force Join
+        if not check_force_join(user_id):
+            channels = get_channels()
+
+            text = "❗ You must join the channels first:\n\n"
+            for ch in channels:
+                text += f"{ch['channel_id']}\n"
+
+            bot.send_message(msg.chat.id, text)
+            return
+
         markup = ReplyKeyboardMarkup(resize_keyboard=True)
-        markup.row(BTN_CREATE, BTN_MYBOTS)
-        markup.row(BTN_HELP)
+        markup.row("➕ Add Bot", "🤖 My Bots")
+        markup.row("❌ Remove Bot")
 
         if user_id == ADMIN_ID:
-            markup.row(BTN_ADMIN)
+            markup.row("⚙️ Admin Panel")
 
-        bot.send_message(msg.chat.id, START_TEXT, reply_markup=markup)
+        bot.send_message(
+            msg.chat.id,
+            "🚀 Welcome to Bot System\n\n"
+            "Create and manage your bots easily.",
+            reply_markup=markup
+        )
 
     # =========================
-    # ➕ CREATE BOT
+    # ➕ ADD BOT
     # =========================
+    @bot.message_handler(func=lambda m: m.text == "➕ Add Bot")
+    def add_bot_step(msg):
+        bot.send_message(msg.chat.id, "📩 Send your bot token:")
+        bot.register_next_step_handler(msg, get_token)
 
-    @bot.message_handler(func=lambda m: m.text == BTN_CREATE)
-    def create(msg):
-        bot.send_message(msg.chat.id, "📩 Ii soo dir TOKEN:")
-
-        bot.register_next_step_handler(msg, save_token)
-
-    def save_token(msg):
+    def get_token(msg):
         token = msg.text.strip()
+        user_data = {"token": token}
+
+        markup = ReplyKeyboardMarkup(resize_keyboard=True)
+        markup.row("🔥 ALL")
+        markup.row("TikTok + Facebook")
+        markup.row("X + Instagram")
+        markup.row("YouTube + Snapchat")
+        markup.row("Pinterest")
+
+        bot.send_message(msg.chat.id, "Choose bot mode:", reply_markup=markup)
+        bot.register_next_step_handler(msg, lambda m: save_bot(m, user_data))
+
+    def save_bot(msg, user_data):
+        token = user_data["token"]
+        mode = msg.text
         user_id = msg.from_user.id
 
         ok, text = create_bot(user_id, token)
+
+        if ok:
+            bots.update_one(
+                {"token": token},
+                {"$set": {"mode": mode}}
+            )
+
         bot.send_message(msg.chat.id, text)
 
     # =========================
     # 🤖 MY BOTS
     # =========================
+    @bot.message_handler(func=lambda m: m.text == "🤖 My Bots")
+    def my_bots(msg):
+        user_bots = get_user_bots(msg.from_user.id)
 
-    @bot.message_handler(func=lambda m: m.text == BTN_MYBOTS)
-    def mybots(msg):
-        bots = get_user_bots(msg.from_user.id)
-
-        if not bots:
-            bot.send_message(msg.chat.id, "❌ Bot ma lihid")
+        if not user_bots:
+            bot.send_message(msg.chat.id, "❌ No bots found.")
             return
 
-        text = "🤖 Bots-kaaga:\n\n"
-        for b in bots:
-            text += f"• @{b.get('username')}\n"
+        text = "🤖 Your Bots:\n\n"
+        for b in user_bots:
+            text += f"• @{b.get('username')} | {b.get('mode','N/A')}\n"
 
         bot.send_message(msg.chat.id, text)
 
     # =========================
-    # ℹ️ HELP
+    # ❌ REMOVE BOT
     # =========================
+    @bot.message_handler(func=lambda m: m.text == "❌ Remove Bot")
+    def remove_bot_step(msg):
+        bot.send_message(msg.chat.id, "Send bot username:")
+        bot.register_next_step_handler(msg, remove_bot)
 
-    @bot.message_handler(func=lambda m: m.text == BTN_HELP)
-    def help(msg):
-        bot.send_message(msg.chat.id, HELP_TEXT)
+    def remove_bot(msg):
+        username = msg.text.replace("@", "")
+        b = bots.find_one({"username": username})
+
+        if not b:
+            bot.send_message(msg.chat.id, "❌ Bot not found.")
+            return
+
+        delete_bot(b["token"])
+        bot.send_message(msg.chat.id, "✅ Bot removed.")
 
     # =========================
     # ⚙️ ADMIN PANEL
     # =========================
-
-    @bot.message_handler(func=lambda m: m.text == BTN_ADMIN)
-    def admin(msg):
+    @bot.message_handler(func=lambda m: m.text == "⚙️ Admin Panel")
+    def admin_panel(msg):
         if msg.from_user.id != ADMIN_ID:
             return
 
         markup = ReplyKeyboardMarkup(resize_keyboard=True)
-        markup.row(ADMIN_STATS, ADMIN_BOTS)
-        markup.row(ADMIN_BROADCAST)
-        markup.row(ADMIN_ADD_CHANNEL, ADMIN_DEL_CHANNEL)
-        markup.row(ADMIN_CLOSE_ALL, ADMIN_OPEN_ALL)
+        markup.row("📊 Stats", "🤖 Bots")
+        markup.row("📢 Broadcast")
+        markup.row("➕ Add Channel", "❌ Remove Channel")
+        markup.row("🔴 Stop Bots", "🟢 Start Bots")
 
-        bot.send_message(msg.chat.id, "⚙️ Admin Panel", reply_markup=markup)
+        bot.send_message(msg.chat.id, "Admin Panel:", reply_markup=markup)
 
     # =========================
     # 📊 STATS
     # =========================
-
-    @bot.message_handler(func=lambda m: m.text == ADMIN_STATS)
+    @bot.message_handler(func=lambda m: m.text == "📊 Stats")
     def stats(msg):
         if msg.from_user.id != ADMIN_ID:
             return
 
-        total_users = len(get_all_bots())
-        bot.send_message(msg.chat.id, f"📊 Total Bots: {total_users}")
+        total = len(get_all_bots())
+        bot.send_message(msg.chat.id, f"Total Bots: {total}")
 
     # =========================
     # 🤖 ALL BOTS
     # =========================
-
-    @bot.message_handler(func=lambda m: m.text == ADMIN_BOTS)
-    def bots_list(msg):
+    @bot.message_handler(func=lambda m: m.text == "🤖 Bots")
+    def all_bots(msg):
         if msg.from_user.id != ADMIN_ID:
             return
 
-        all_bots = get_all_bots()
+        allbots = get_all_bots()
 
-        text = "🤖 Bots List:\n\n"
-        for b in all_bots:
+        text = "Bots:\n\n"
+        for b in allbots:
             text += f"• @{b.get('username')}\n"
 
         bot.send_message(msg.chat.id, text)
@@ -120,82 +186,74 @@ def start_main_bot():
     # =========================
     # 📢 BROADCAST
     # =========================
-
-    @bot.message_handler(func=lambda m: m.text == ADMIN_BROADCAST)
+    @bot.message_handler(func=lambda m: m.text == "📢 Broadcast")
     def broadcast(msg):
         if msg.from_user.id != ADMIN_ID:
             return
 
-        bot.send_message(msg.chat.id, "📩 Dir fariinta:")
+        bot.send_message(msg.chat.id, "Send message:")
         bot.register_next_step_handler(msg, send_broadcast)
 
     def send_broadcast(msg):
         text = msg.text
-        all_bots = get_all_bots()
-
-        for b in all_bots:
+        for b in get_all_bots():
             try:
-                tb = telebot.TeleBot(b["token"])
-                tb.send_message(msg.chat.id, text)
+                telebot.TeleBot(b["token"]).send_message(msg.chat.id, text)
             except:
                 pass
 
-        bot.send_message(msg.chat.id, "✅ Broadcast done")
+        bot.send_message(msg.chat.id, "✅ Sent.")
 
     # =========================
     # 📢 CHANNELS
     # =========================
-
-    @bot.message_handler(func=lambda m: m.text == ADMIN_ADD_CHANNEL)
-    def addch(msg):
+    @bot.message_handler(func=lambda m: m.text == "➕ Add Channel")
+    def add_channel_step(msg):
         if msg.from_user.id != ADMIN_ID:
             return
 
-        bot.send_message(msg.chat.id, "📩 Dir channel id:")
+        bot.send_message(msg.chat.id, "Send channel ID or @username:")
         bot.register_next_step_handler(msg, save_channel)
 
     def save_channel(msg):
         add_channel(msg.text.strip())
-        bot.send_message(msg.chat.id, "✅ Channel added")
+        bot.send_message(msg.chat.id, "✅ Channel added.")
 
-    @bot.message_handler(func=lambda m: m.text == ADMIN_DEL_CHANNEL)
-    def delch(msg):
+    @bot.message_handler(func=lambda m: m.text == "❌ Remove Channel")
+    def remove_channel_step(msg):
         if msg.from_user.id != ADMIN_ID:
             return
 
-        bot.send_message(msg.chat.id, "📩 Dir channel id:")
-        bot.register_next_step_handler(msg, del_channel)
+        bot.send_message(msg.chat.id, "Send channel ID:")
+        bot.register_next_step_handler(msg, delete_channel)
 
-    def del_channel(msg):
+    def delete_channel(msg):
         remove_channel(msg.text.strip())
-        bot.send_message(msg.chat.id, "❌ Channel removed")
+        bot.send_message(msg.chat.id, "❌ Channel removed.")
 
     # =========================
-    # 🔴 CLOSE ALL
+    # 🔴 STOP ALL
     # =========================
-
-    @bot.message_handler(func=lambda m: m.text == ADMIN_CLOSE_ALL)
-    def close_all(msg):
+    @bot.message_handler(func=lambda m: m.text == "🔴 Stop Bots")
+    def stop(msg):
         if msg.from_user.id != ADMIN_ID:
             return
 
         stop_all_bots()
-        bot.send_message(msg.chat.id, "🔴 All bots stopped")
+        bot.send_message(msg.chat.id, "Stopped all bots.")
 
     # =========================
-    # 🟢 OPEN ALL
+    # 🟢 START ALL
     # =========================
-
-    @bot.message_handler(func=lambda m: m.text == ADMIN_OPEN_ALL)
-    def open_all(msg):
+    @bot.message_handler(func=lambda m: m.text == "🟢 Start Bots")
+    def start_all(msg):
         if msg.from_user.id != ADMIN_ID:
             return
 
         start_all_bots(get_all_bots())
-        bot.send_message(msg.chat.id, "🟢 All bots started")
+        bot.send_message(msg.chat.id, "Started all bots.")
 
     # =========================
     # ▶️ RUN
     # =========================
-
     bot.infinity_polling()
