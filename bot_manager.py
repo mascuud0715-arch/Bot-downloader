@@ -1,11 +1,11 @@
 import telebot
 import threading
 import requests
+import yt_dlp
+import os
 
-from database import add_bot, add_user_bot, add_stats, inc_users, inc_videos, inc_images, get_stats
-from config import MAX_BOTS_PER_USER
+from database import *
 
-# Running bots (RAM)
 running_bots = {}
 
 # =========================
@@ -25,6 +25,26 @@ def check_token(token):
         return False, None
 
 # =========================
+# 📥 DOWNLOAD FUNCTION
+# =========================
+
+def download_media(url):
+    if not os.path.exists("downloads"):
+        os.makedirs("downloads")
+
+    ydl_opts = {
+        'outtmpl': 'downloads/%(title)s.%(ext)s',
+        'format': 'best'
+    }
+
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            return ydl.prepare_filename(info)
+    except:
+        return None
+
+# =========================
 # 🤖 START USER BOT
 # =========================
 
@@ -32,71 +52,149 @@ def start_user_bot(token, owner_id):
     if token in running_bots:
         return
 
-    try:
-        bot = telebot.TeleBot(token)
+    bot = telebot.TeleBot(token)
 
-        # =========================
-        # 🏁 START
-        # =========================
-        @bot.message_handler(commands=['start'])
-        def start(msg):
-            inc_users(token)
+    # =========================
+    # 🏁 START
+    # =========================
+    @bot.message_handler(commands=['start'])
+    def start(msg):
+        inc_users(token)
 
-            markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-            markup.row("🎬 Download Video", "🖼️ Download Image")
-            markup.row("📊 Stats")
+        markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
+        markup.row("📥 Download", "📊 Stats")
+        markup.row("⚙️ Admin Panel")
 
-            bot.send_message(
-                msg.chat.id,
-                "🤖 Kusoo dhawoow bot-kaaga!",
-                reply_markup=markup
-            )
+        bot.send_message(
+            msg.chat.id,
+            "🤖 Welcome!\n\n"
+            "Send any video or photo link.\n"
+            "Supported:\n"
+            "• TikTok\n• Instagram\n• X (Twitter)\n• YouTube\n• Facebook\n• Pinterest\n\n"
+            "Use Download button to begin.",
+            reply_markup=markup
+        )
 
-        # =========================
-        # 🎬 VIDEO (FAKE TRACK)
-        # =========================
-        @bot.message_handler(func=lambda m: m.text == "🎬 Download Video")
-        def video(msg):
+    # =========================
+    # 📥 DOWNLOAD MENU
+    # =========================
+    @bot.message_handler(func=lambda m: m.text == "📥 Download")
+    def download_menu(msg):
+        markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
+
+        markup.row("🔥 ALL")
+        markup.row("TikTok + Facebook")
+        markup.row("X + Instagram")
+        markup.row("YouTube + Snapchat")
+        markup.row("Pinterest")
+
+        bot.send_message(msg.chat.id, "Choose mode:", reply_markup=markup)
+
+    # =========================
+    # 🎯 MODE SELECT
+    # =========================
+    user_modes = {}
+
+    @bot.message_handler(func=lambda m: m.text in [
+        "🔥 ALL", "TikTok + Facebook",
+        "X + Instagram", "YouTube + Snapchat", "Pinterest"
+    ])
+    def set_mode(msg):
+        user_modes[msg.chat.id] = msg.text
+        bot.send_message(msg.chat.id, "📩 Send link now:")
+
+    # =========================
+    # 🔗 HANDLE LINK
+    # =========================
+    @bot.message_handler(func=lambda m: m.text.startswith("http"))
+    def handle_link(msg):
+        bot.send_message(msg.chat.id, "⏳ Downloading...")
+
+        file_path = download_media(msg.text)
+
+        if not file_path:
+            bot.send_message(msg.chat.id, "❌ Failed to download.")
+            return
+
+        try:
+            with open(file_path, "rb") as f:
+                bot.send_document(msg.chat.id, f)
+
             inc_videos(token)
-            bot.send_message(msg.chat.id, "📥 Video la diiwaan geliyay!")
 
-        # =========================
-        # 🖼️ IMAGE (FAKE TRACK)
-        # =========================
-        @bot.message_handler(func=lambda m: m.text == "🖼️ Download Image")
-        def image(msg):
-            inc_images(token)
-            bot.send_message(msg.chat.id, "📥 Image la diiwaan geliyay!")
+        except:
+            bot.send_message(msg.chat.id, "❌ Error sending file.")
 
-        # =========================
-        # 📊 STATS
-        # =========================
-        @bot.message_handler(func=lambda m: m.text == "📊 Stats")
-        def stats(msg):
-            s = get_stats(token)
+        # delete file after send
+        try:
+            os.remove(file_path)
+        except:
+            pass
 
-            if not s:
-                bot.send_message(msg.chat.id, "No stats yet")
-                return
+    # =========================
+    # 📊 STATS
+    # =========================
+    @bot.message_handler(func=lambda m: m.text == "📊 Stats")
+    def stats(msg):
+        s = get_stats(token)
 
-            text = (
-                f"📊 Stats Bot\n\n"
-                f"👥 Users: {s.get('users',0)}\n"
-                f"🎬 Videos: {s.get('videos',0)}\n"
-                f"🖼️ Images: {s.get('images',0)}"
-            )
+        if not s:
+            bot.send_message(msg.chat.id, "No stats yet")
+            return
 
-            bot.send_message(msg.chat.id, text)
+        text = (
+            f"📊 Bot Stats\n\n"
+            f"👥 Users: {s.get('users',0)}\n"
+            f"🎬 Videos: {s.get('videos',0)}\n"
+            f"🖼️ Images: {s.get('images',0)}"
+        )
 
-        # Run bot
-        t = threading.Thread(target=bot.infinity_polling)
-        t.start()
+        bot.send_message(msg.chat.id, text)
 
-        running_bots[token] = bot
-        print(f"✅ Bot started: {token}")
+    # =========================
+    # ⚙️ OWNER ADMIN PANEL
+    # =========================
+    @bot.message_handler(func=lambda m: m.text == "⚙️ Admin Panel")
+    def admin_panel(msg):
+        if msg.from_user.id != owner_id:
+            bot.send_message(msg.chat.id, "❌ You are not owner.")
+            return
 
-    except Exception as e:
-        print(f"❌ Error bot: {e}")
+        markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
+        markup.row("📢 Broadcast", "📊 Stats")
+
+        bot.send_message(msg.chat.id, "Owner Panel:", reply_markup=markup)
+
+    # =========================
+    # 📢 BROADCAST (OWNER)
+    # =========================
+    @bot.message_handler(func=lambda m: m.text == "📢 Broadcast")
+    def owner_broadcast(msg):
+        if msg.from_user.id != owner_id:
+            return
+
+        bot.send_message(msg.chat.id, "Send message:")
+        bot.register_next_step_handler(msg, send_owner_broadcast)
+
+    def send_owner_broadcast(msg):
+        users = users_col.find()
+
+        for u in users:
+            try:
+                bot.send_message(u["user_id"], msg.text)
+            except:
+                pass
+
+        bot.send_message(msg.chat.id, "✅ Broadcast sent.")
+
+    # =========================
+    # ▶️ RUN BOT
+    # =========================
+    t = threading.Thread(target=bot.infinity_polling)
+    t.start()
+
+    running_bots[token] = bot
+    print(f"✅ Bot started: {token}")
 
 # =========================
 # ➕ CREATE BOT
@@ -106,17 +204,15 @@ def create_bot(user_id, token):
     valid, username = check_token(token)
 
     if not valid:
-        return False, "❌ Token sax ma aha!"
+        return False, "❌ Invalid token"
 
-    # Save DB
     add_bot(user_id, token, username)
     add_user_bot(user_id, token)
     add_stats(token)
 
-    # Start bot
     start_user_bot(token, user_id)
 
-    return True, f"✅ Bot waa la sameeyay: @{username}"
+    return True, f"✅ Bot created: @{username}"
 
 # =========================
 # 🔴 STOP BOT
@@ -137,12 +233,16 @@ def stop_bot(token):
     return False
 
 # =========================
-# 🟢 START ALL / STOP ALL
+# 🔴 STOP ALL
 # =========================
 
 def stop_all_bots():
     for token in list(running_bots.keys()):
         stop_bot(token)
+
+# =========================
+# 🟢 START ALL
+# =========================
 
 def start_all_bots(bots_list):
     for b in bots_list:
