@@ -8,8 +8,7 @@ import time
 # =========================
 # 🚀 START USER BOTS
 # =========================
-
-def start_all_bots():
+def start_all_user_bots():
     bots = get_all_bots()
 
     if not bots:
@@ -31,20 +30,21 @@ def start_all_bots():
 # =========================
 # 🧠 MAIN SYSTEM
 # =========================
-
 def run():
     print("🚀 SYSTEM STARTING...\n")
 
-    # Start all bots in background
-    t = threading.Thread(target=start_all_bots)
-    t.start()
+    # 1️⃣ Start USER BOTS (thread)
+    threading.Thread(target=start_all_user_bots).start()
 
-    # Start main bot
-    start_main_bot()
+    # 2️⃣ Start MAIN BOT (thread sidoo kale 🔥)
+    threading.Thread(target=start_main_bot).start()
+
+    # 3️⃣ Keep process alive
+    while True:
+        time.sleep(10)
 
 # =========================
 # ▶️ RUN
 # =========================
-
 if __name__ == "__main__":
     run()
