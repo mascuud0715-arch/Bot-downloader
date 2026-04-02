@@ -69,6 +69,46 @@ def check_force_join(bot, user_id):
     return True
 
 # =========================
+# 🔘 JOIN BUTTONS
+# =========================
+def send_join_buttons(bot, chat_id):
+    channels = get_channels()
+
+    markup = telebot.types.InlineKeyboardMarkup()
+
+    # JOIN BUTTONS
+    for ch in channels:
+        link = ch.get("link") or f"https://t.me/{ch['channel_id'].replace('@','')}"
+        markup.add(
+            telebot.types.InlineKeyboardButton("➕ JOIN CHANNEL", url=link)
+        )
+
+    # CONFIRM BUTTON
+    markup.add(
+        telebot.types.InlineKeyboardButton("✅ CONFIRM", callback_data="confirm_join")
+    )
+
+    bot.send_message(
+        chat_id,
+        "⚠️ You must join our channel to use this bot.",
+        reply_markup=markup
+    )
+
+# =========================
+# ✅ CONFIRM JOIN
+# =========================
+@bot.callback_query_handler(func=lambda call: call.data == "confirm_join")
+def confirm_join(call):
+    user_id = call.from_user.id
+
+    if check_force_join(bot, user_id):
+        bot.answer_callback_query(call.id, "✅ Joined successfully!")
+        bot.send_message(call.message.chat.id, "✅ Join confirmed! Now send your link.")
+    else:
+        bot.answer_callback_query(call.id, "❌ Not joined!")
+        bot.send_message(call.message.chat.id, "❗ Please join channels first.")
+
+# =========================
 # 🤖 START USER BOT
 # =========================
 def start_user_bot(token, owner_id):
@@ -88,8 +128,8 @@ def start_user_bot(token, owner_id):
         inc_users(token)
 
         if not check_force_join(bot, user_id):
-            bot.send_message(msg.chat.id, "❗ Please join required channels first.")
-            return
+           send_join_buttons(bot, msg.chat.id)
+           return
 
         bot.send_message(
             msg.chat.id,
