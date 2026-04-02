@@ -10,27 +10,22 @@ bot = telebot.TeleBot(BOT_TOKEN)
 # =========================
 # 🔒 FORCE JOIN CHECK
 # =========================
-
 def check_force_join(user_id):
     if not FORCE_JOIN_ON:
         return True
 
-    chs = get_channels()
-
-    for ch in chs:
+    for ch in get_channels():
         try:
             member = bot.get_chat_member(ch["channel_id"], user_id)
             if member.status not in ["member", "administrator", "creator"]:
                 return False
         except:
             return False
-
     return True
 
 # =========================
 # 🚀 START MAIN BOT
 # =========================
-
 def start_main_bot():
     print("✅ Main Bot Running...")
 
@@ -42,15 +37,11 @@ def start_main_bot():
         user_id = msg.from_user.id
         add_user(user_id)
 
-        # 🔒 Force Join
         if not check_force_join(user_id):
-            channels = get_channels()
-
-            text = "❗ You must join the channels first:\n\n"
-            for ch in channels:
-                text += f"{ch['channel_id']}\n"
-
-            bot.send_message(msg.chat.id, text)
+            txt = "❗ Join required channels first:\n\n"
+            for ch in get_channels():
+                txt += f"{ch['channel_id']}\n"
+            bot.send_message(msg.chat.id, txt)
             return
 
         markup = ReplyKeyboardMarkup(resize_keyboard=True)
@@ -62,8 +53,7 @@ def start_main_bot():
 
         bot.send_message(
             msg.chat.id,
-            "🚀 Welcome to Bot System\n\n"
-            "Create and manage your bots easily.",
+            "🚀 Bot Management System\n\nCreate & control your bots easily.",
             reply_markup=markup
         )
 
@@ -72,7 +62,7 @@ def start_main_bot():
     # =========================
     @bot.message_handler(func=lambda m: m.text == "➕ Add Bot")
     def add_bot_step(msg):
-        bot.send_message(msg.chat.id, "📩 Send your bot token:")
+        bot.send_message(msg.chat.id, "Send your bot token:")
         bot.register_next_step_handler(msg, get_token)
 
     def get_token(msg):
@@ -109,15 +99,15 @@ def start_main_bot():
     # =========================
     @bot.message_handler(func=lambda m: m.text == "🤖 My Bots")
     def my_bots(msg):
-        user_bots = get_user_bots(msg.from_user.id)
+        data = get_user_bots(msg.from_user.id)
 
-        if not user_bots:
-            bot.send_message(msg.chat.id, "❌ No bots found.")
+        if not data:
+            bot.send_message(msg.chat.id, "No bots found.")
             return
 
-        text = "🤖 Your Bots:\n\n"
-        for b in user_bots:
-            text += f"• @{b.get('username')} | {b.get('mode','N/A')}\n"
+        text = "Your Bots:\n\n"
+        for b in data:
+            text += f"• @{b['username']} | {b.get('mode','N/A')}\n"
 
         bot.send_message(msg.chat.id, text)
 
@@ -134,11 +124,11 @@ def start_main_bot():
         b = bots.find_one({"username": username})
 
         if not b:
-            bot.send_message(msg.chat.id, "❌ Bot not found.")
+            bot.send_message(msg.chat.id, "Bot not found.")
             return
 
         delete_bot(b["token"])
-        bot.send_message(msg.chat.id, "✅ Bot removed.")
+        bot.send_message(msg.chat.id, "Bot removed.")
 
     # =========================
     # ⚙️ ADMIN PANEL
@@ -150,7 +140,7 @@ def start_main_bot():
 
         markup = ReplyKeyboardMarkup(resize_keyboard=True)
         markup.row("📊 Stats", "🤖 Bots")
-        markup.row("📢 Broadcast")
+        markup.row("📢 Broadcast ALL USERS")
         markup.row("➕ Add Channel", "❌ Remove Channel")
         markup.row("🔴 Stop Bots", "🟢 Start Bots")
 
@@ -164,8 +154,10 @@ def start_main_bot():
         if msg.from_user.id != ADMIN_ID:
             return
 
-        total = len(get_all_bots())
-        bot.send_message(msg.chat.id, f"Total Bots: {total}")
+        bot.send_message(
+            msg.chat.id,
+            f"Total Bots: {len(get_all_bots())}"
+        )
 
     # =========================
     # 🤖 ALL BOTS
@@ -175,34 +167,43 @@ def start_main_bot():
         if msg.from_user.id != ADMIN_ID:
             return
 
-        allbots = get_all_bots()
-
-        text = "Bots:\n\n"
-        for b in allbots:
-            text += f"• @{b.get('username')}\n"
+        text = "All Bots:\n\n"
+        for b in get_all_bots():
+            text += f"• @{b['username']}\n"
 
         bot.send_message(msg.chat.id, text)
 
     # =========================
-    # 📢 BROADCAST
+    # 📢 GLOBAL BROADCAST
     # =========================
-    @bot.message_handler(func=lambda m: m.text == "📢 Broadcast")
-    def broadcast(msg):
+    @bot.message_handler(func=lambda m: m.text == "📢 Broadcast ALL USERS")
+    def broadcast_all(msg):
         if msg.from_user.id != ADMIN_ID:
             return
 
         bot.send_message(msg.chat.id, "Send message:")
-        bot.register_next_step_handler(msg, send_broadcast)
+        bot.register_next_step_handler(msg, send_global)
 
-    def send_broadcast(msg):
+    def send_global(msg):
         text = msg.text
+
+        sent = 0
+
         for b in get_all_bots():
             try:
-                telebot.TeleBot(b["token"]).send_message(msg.chat.id, text)
+                tb = telebot.TeleBot(b["token"])
+
+                # users collection
+                for u in users.find():
+                    try:
+                        tb.send_message(u["user_id"], text)
+                        sent += 1
+                    except:
+                        pass
             except:
                 pass
 
-        bot.send_message(msg.chat.id, "✅ Sent.")
+        bot.send_message(msg.chat.id, f"✅ Sent to {sent} users")
 
     # =========================
     # 📢 CHANNELS
@@ -212,24 +213,24 @@ def start_main_bot():
         if msg.from_user.id != ADMIN_ID:
             return
 
-        bot.send_message(msg.chat.id, "Send channel ID or @username:")
+        bot.send_message(msg.chat.id, "Send @channel or ID:")
         bot.register_next_step_handler(msg, save_channel)
 
     def save_channel(msg):
         add_channel(msg.text.strip())
-        bot.send_message(msg.chat.id, "✅ Channel added.")
+        bot.send_message(msg.chat.id, "Channel added.")
 
     @bot.message_handler(func=lambda m: m.text == "❌ Remove Channel")
     def remove_channel_step(msg):
         if msg.from_user.id != ADMIN_ID:
             return
 
-        bot.send_message(msg.chat.id, "Send channel ID:")
+        bot.send_message(msg.chat.id, "Send channel:")
         bot.register_next_step_handler(msg, delete_channel)
 
     def delete_channel(msg):
         remove_channel(msg.text.strip())
-        bot.send_message(msg.chat.id, "❌ Channel removed.")
+        bot.send_message(msg.chat.id, "Channel removed.")
 
     # =========================
     # 🔴 STOP ALL
@@ -240,7 +241,7 @@ def start_main_bot():
             return
 
         stop_all_bots()
-        bot.send_message(msg.chat.id, "Stopped all bots.")
+        bot.send_message(msg.chat.id, "All bots stopped.")
 
     # =========================
     # 🟢 START ALL
@@ -251,7 +252,7 @@ def start_main_bot():
             return
 
         start_all_bots(get_all_bots())
-        bot.send_message(msg.chat.id, "Started all bots.")
+        bot.send_message(msg.chat.id, "All bots started.")
 
     # =========================
     # ▶️ RUN
