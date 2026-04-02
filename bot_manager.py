@@ -128,8 +128,8 @@ def start_user_bot(token, owner_id):
         inc_users(token)
 
         if not check_force_join(bot, user_id):
-           send_join_buttons(bot, msg.chat.id)
-           return
+            send_join_buttons(bot, msg.chat.id)
+            return
 
         bot.send_message(
             msg.chat.id,
