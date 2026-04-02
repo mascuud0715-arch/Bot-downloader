@@ -1,6 +1,6 @@
 import telebot
 from telebot.types import ReplyKeyboardMarkup
-
+from bot_manager import send_join_buttons
 from config import *
 from database import *
 from bot_manager import create_bot, stop_all_bots, start_all_bots
@@ -37,12 +37,10 @@ def start_main_bot():
         user_id = msg.from_user.id
         add_user(user_id)
 
-        if not check_force_join(user_id):
-            txt = "❗ Join required channels first:\n\n"
-            for ch in get_channels():
-                txt += f"{ch['channel_id']}\n"
-            bot.send_message(msg.chat.id, txt)
-            return
+        
+       if not check_force_join(user_id):
+           send_join_buttons(bot, msg.chat.id)
+           return
 
         markup = ReplyKeyboardMarkup(resize_keyboard=True)
         markup.row("➕ Add Bot", "🤖 My Bots")
