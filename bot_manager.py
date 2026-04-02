@@ -6,6 +6,7 @@ import os
 
 from database import *
 
+# Running bots
 running_bots = {}
 
 # =========================
@@ -21,7 +22,7 @@ def check_token(token):
         return False, None
 
 # =========================
-# 📥 DOWNLOAD
+# 📥 DOWNLOAD MEDIA
 # =========================
 def download_media(url):
     if not os.path.exists("downloads"):
@@ -40,19 +41,31 @@ def download_media(url):
         return None
 
 # =========================
-# 🔒 FORCE JOIN CHECK (USER BOT)
+# 🎵 CONVERT TO MP3
+# =========================
+def convert_to_mp3(file_path):
+    try:
+        mp3_path = file_path.rsplit(".", 1)[0] + ".mp3"
+
+        os.system(f'ffmpeg -i "{file_path}" -q:a 0 -map a "{mp3_path}"')
+
+        if os.path.exists(mp3_path):
+            return mp3_path
+        return None
+    except:
+        return None
+
+# =========================
+# 🔒 FORCE JOIN CHECK
 # =========================
 def check_force_join(bot, user_id):
-    channels = get_channels()
-
-    for ch in channels:
+    for ch in get_channels():
         try:
             member = bot.get_chat_member(ch["channel_id"], user_id)
             if member.status not in ["member", "administrator", "creator"]:
                 return False
         except:
             return False
-
     return True
 
 # =========================
@@ -71,22 +84,24 @@ def start_user_bot(token, owner_id):
     def start(msg):
         user_id = msg.from_user.id
 
-        # Save user (IMPORTANT)
         add_user(user_id)
+        inc_users(token)
 
-        # Force Join
         if not check_force_join(bot, user_id):
             bot.send_message(msg.chat.id, "❗ Please join required channels first.")
             return
 
-        inc_users(token)
-
         bot.send_message(
             msg.chat.id,
-            "🤖 Welcome to Downloader Bot!\n\n"
-            "Send any link from:\n"
-            "TikTok, Instagram, Facebook, X, YouTube, Pinterest\n\n"
-            "I will download video/photo for you."
+            "🤖 Welcome!\n\n"
+            "Send any video or photo link.\n\n"
+            "Supported:\n"
+            "• TikTok\n"
+            "• Instagram\n"
+            "• X (Twitter)\n"
+            "• YouTube\n"
+            "• Facebook\n"
+            "• Pinterest"
         )
 
     # =========================
@@ -96,50 +111,80 @@ def start_user_bot(token, owner_id):
     def handle_link(msg):
         user_id = msg.from_user.id
 
-        # Force Join
         if not check_force_join(bot, user_id):
             bot.send_message(msg.chat.id, "❗ Join channels first.")
             return
 
-        # Get bot mode
         bot_data = bots.find_one({"token": token})
         mode = bot_data.get("mode", "🔥 ALL")
 
         url = msg.text.lower()
 
         # =========================
-        # 🎯 MODE FILTER
+        # 🎯 MODE FILTER (IMPROVED)
         # =========================
         if mode != "🔥 ALL":
-            if "tiktok" in mode.lower() and "tiktok.com" not in url:
-                bot.send_message(msg.chat.id, "❌ Only TikTok allowed.")
-                return
-            if "facebook" in mode.lower() and "facebook.com" not in url:
-                bot.send_message(msg.chat.id, "❌ Only Facebook allowed.")
-                return
-            if "instagram" in mode.lower() and "instagram.com" not in url:
-                bot.send_message(msg.chat.id, "❌ Only Instagram allowed.")
-                return
-            if "x" in mode.lower() and "twitter.com" not in url:
-                bot.send_message(msg.chat.id, "❌ Only X allowed.")
+            allowed = False
+
+            if "tiktok" in mode.lower() and "tiktok.com" in url:
+                allowed = True
+            if "facebook" in mode.lower() and "facebook.com" in url:
+                allowed = True
+            if "instagram" in mode.lower() and "instagram.com" in url:
+                allowed = True
+            if "x" in mode.lower() and ("twitter.com" in url or "x.com" in url):
+                allowed = True
+            if "youtube" in mode.lower() and ("youtube.com" in url or "youtu.be" in url):
+                allowed = True
+            if "pinterest" in mode.lower() and "pinterest.com" in url:
+                allowed = True
+
+            if not allowed:
+                bot.send_message(msg.chat.id, "❌ This link is not allowed in this bot mode.")
                 return
 
-        bot.send_message(msg.chat.id, "⏳ Downloading...")
+        # =========================
+        # ⏳ DOWNLOADING
+        # =========================
+        loading = bot.send_message(msg.chat.id, "⏳ Downloading...")
 
         file_path = download_media(msg.text)
 
+        # Delete loading message
+        try:
+            bot.delete_message(msg.chat.id, loading.message_id)
+        except:
+            pass
+
         if not file_path:
-            bot.send_message(msg.chat.id, "❌ Failed.")
+            bot.send_message(msg.chat.id, "❌ Download failed.")
             return
+
+        # 👉 QAYBTA 2 ayaa halkaan ka sii socota
 
         try:
             username = bot.get_me().username
 
+            # 🎵 INLINE BUTTON
+            markup = telebot.types.InlineKeyboardMarkup()
+            markup.add(
+                telebot.types.InlineKeyboardButton(
+                    "🎵 MUSIC",
+                    callback_data=f"music|{file_path}"
+                )
+            )
+
             caption = f"Via: @{username}"
 
             with open(file_path, "rb") as f:
-                bot.send_document(msg.chat.id, f, caption=caption)
+                bot.send_document(
+                    msg.chat.id,
+                    f,
+                    caption=caption,
+                    reply_markup=markup
+                )
 
+            # MESSAGE 2
             bot.send_message(
                 msg.chat.id,
                 "Created: @Create_Your_via_downloader_bot"
@@ -147,16 +192,45 @@ def start_user_bot(token, owner_id):
 
             inc_videos(token)
 
-        except:
+            # DELETE FILE (IMPORTANT 🚀)
+            try:
+                os.remove(file_path)
+            except:
+                pass
+
+        except Exception as e:
             bot.send_message(msg.chat.id, "❌ Send error")
 
+    # =========================
+    # 🎵 MUSIC BUTTON
+    # =========================
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("music"))
+    def music_handler(call):
+        data = call.data.split("|")
+
+        if len(data) < 2:
+            return
+
+        file_path = data[1]
+
+        bot.answer_callback_query(call.id, "⏳ Converting...")
+
+        mp3 = convert_to_mp3(file_path)
+
+        if not mp3:
+            bot.send_message(call.message.chat.id, "❌ Failed to convert.")
+            return
+
         try:
-            os.remove(file_path)
+            with open(mp3, "rb") as f:
+                bot.send_audio(call.message.chat.id, f)
+
+            os.remove(mp3)
         except:
-            pass
+            bot.send_message(call.message.chat.id, "❌ Error sending audio")
 
     # =========================
-    # ⚙️ OWNER ADMIN PANEL (PRIVATE)
+    # ⚙️ OWNER ADMIN PANEL
     # =========================
     @bot.message_handler(commands=['admin'])
     def admin_panel(msg):
@@ -190,7 +264,7 @@ def start_user_bot(token, owner_id):
         bot.send_message(msg.chat.id, text)
 
     # =========================
-    # 📢 BROADCAST
+    # 📢 BROADCAST (FIXED DB)
     # =========================
     @bot.message_handler(commands=['broadcast'])
     def broadcast(msg):
@@ -201,23 +275,25 @@ def start_user_bot(token, owner_id):
         bot.register_next_step_handler(msg, send_bc)
 
     def send_bc(msg):
-        users = users.find()
+        text = msg.text
 
-        for u in users:
+        # FIX: use DB function
+        for u in get_all_users():
             try:
-                bot.send_message(u["user_id"], msg.text)
+                bot.send_message(u["user_id"], text)
             except:
                 pass
 
-        bot.send_message(msg.chat.id, "✅ Done")
+        bot.send_message(msg.chat.id, "✅ Broadcast sent")
 
     # =========================
-    # ▶️ RUN
+    # ▶️ RUN BOT
     # =========================
     t = threading.Thread(target=bot.infinity_polling)
     t.start()
 
     running_bots[token] = bot
+
 
 # =========================
 # ➕ CREATE BOT
@@ -236,6 +312,7 @@ def create_bot(user_id, token):
 
     return True, f"✅ Bot created: @{username}"
 
+
 # =========================
 # 🔴 STOP ALL
 # =========================
@@ -246,6 +323,7 @@ def stop_all_bots():
         except:
             pass
         del running_bots[token]
+
 
 # =========================
 # 🟢 START ALL
