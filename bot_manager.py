@@ -11,23 +11,18 @@ running_bots = {}
 # =========================
 # 🔍 CHECK TOKEN
 # =========================
-
 def check_token(token):
     try:
-        url = f"https://api.telegram.org/bot{token}/getMe"
-        res = requests.get(url).json()
-
+        res = requests.get(f"https://api.telegram.org/bot{token}/getMe").json()
         if res.get("ok"):
             return True, res["result"]["username"]
-        else:
-            return False, None
+        return False, None
     except:
         return False, None
 
 # =========================
-# 📥 DOWNLOAD FUNCTION
+# 📥 DOWNLOAD
 # =========================
-
 def download_media(url):
     if not os.path.exists("downloads"):
         os.makedirs("downloads")
@@ -45,9 +40,24 @@ def download_media(url):
         return None
 
 # =========================
+# 🔒 FORCE JOIN CHECK (USER BOT)
+# =========================
+def check_force_join(bot, user_id):
+    channels = get_channels()
+
+    for ch in channels:
+        try:
+            member = bot.get_chat_member(ch["channel_id"], user_id)
+            if member.status not in ["member", "administrator", "creator"]:
+                return False
+        except:
+            return False
+
+    return True
+
+# =========================
 # 🤖 START USER BOT
 # =========================
-
 def start_user_bot(token, owner_id):
     if token in running_bots:
         return
@@ -59,125 +69,139 @@ def start_user_bot(token, owner_id):
     # =========================
     @bot.message_handler(commands=['start'])
     def start(msg):
-        inc_users(token)
+        user_id = msg.from_user.id
 
-        markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-        markup.row("📥 Download", "📊 Stats")
-        markup.row("⚙️ Admin Panel")
+        # Save user (IMPORTANT)
+        add_user(user_id)
+
+        # Force Join
+        if not check_force_join(bot, user_id):
+            bot.send_message(msg.chat.id, "❗ Please join required channels first.")
+            return
+
+        inc_users(token)
 
         bot.send_message(
             msg.chat.id,
-            "🤖 Welcome!\n\n"
-            "Send any video or photo link.\n"
-            "Supported:\n"
-            "• TikTok\n• Instagram\n• X (Twitter)\n• YouTube\n• Facebook\n• Pinterest\n\n"
-            "Use Download button to begin.",
-            reply_markup=markup
+            "🤖 Welcome to Downloader Bot!\n\n"
+            "Send any link from:\n"
+            "TikTok, Instagram, Facebook, X, YouTube, Pinterest\n\n"
+            "I will download video/photo for you."
         )
 
     # =========================
-    # 📥 DOWNLOAD MENU
+    # 🔗 HANDLE LINKS
     # =========================
-    @bot.message_handler(func=lambda m: m.text == "📥 Download")
-    def download_menu(msg):
-        markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-
-        markup.row("🔥 ALL")
-        markup.row("TikTok + Facebook")
-        markup.row("X + Instagram")
-        markup.row("YouTube + Snapchat")
-        markup.row("Pinterest")
-
-        bot.send_message(msg.chat.id, "Choose mode:", reply_markup=markup)
-
-    # =========================
-    # 🎯 MODE SELECT
-    # =========================
-    user_modes = {}
-
-    @bot.message_handler(func=lambda m: m.text in [
-        "🔥 ALL", "TikTok + Facebook",
-        "X + Instagram", "YouTube + Snapchat", "Pinterest"
-    ])
-    def set_mode(msg):
-        user_modes[msg.chat.id] = msg.text
-        bot.send_message(msg.chat.id, "📩 Send link now:")
-
-    # =========================
-    # 🔗 HANDLE LINK
-    # =========================
-    @bot.message_handler(func=lambda m: m.text.startswith("http"))
+    @bot.message_handler(func=lambda m: m.text and m.text.startswith("http"))
     def handle_link(msg):
+        user_id = msg.from_user.id
+
+        # Force Join
+        if not check_force_join(bot, user_id):
+            bot.send_message(msg.chat.id, "❗ Join channels first.")
+            return
+
+        # Get bot mode
+        bot_data = bots.find_one({"token": token})
+        mode = bot_data.get("mode", "🔥 ALL")
+
+        url = msg.text.lower()
+
+        # =========================
+        # 🎯 MODE FILTER
+        # =========================
+        if mode != "🔥 ALL":
+            if "tiktok" in mode.lower() and "tiktok.com" not in url:
+                bot.send_message(msg.chat.id, "❌ Only TikTok allowed.")
+                return
+            if "facebook" in mode.lower() and "facebook.com" not in url:
+                bot.send_message(msg.chat.id, "❌ Only Facebook allowed.")
+                return
+            if "instagram" in mode.lower() and "instagram.com" not in url:
+                bot.send_message(msg.chat.id, "❌ Only Instagram allowed.")
+                return
+            if "x" in mode.lower() and "twitter.com" not in url:
+                bot.send_message(msg.chat.id, "❌ Only X allowed.")
+                return
+
         bot.send_message(msg.chat.id, "⏳ Downloading...")
 
         file_path = download_media(msg.text)
 
         if not file_path:
-            bot.send_message(msg.chat.id, "❌ Failed to download.")
+            bot.send_message(msg.chat.id, "❌ Failed.")
             return
 
         try:
+            username = bot.get_me().username
+
+            caption = f"Via: @{username}"
+
             with open(file_path, "rb") as f:
-                bot.send_document(msg.chat.id, f)
+                bot.send_document(msg.chat.id, f, caption=caption)
+
+            bot.send_message(
+                msg.chat.id,
+                "Created: @Create_Your_via_downloader_bot"
+            )
 
             inc_videos(token)
 
         except:
-            bot.send_message(msg.chat.id, "❌ Error sending file.")
+            bot.send_message(msg.chat.id, "❌ Send error")
 
-        # delete file after send
         try:
             os.remove(file_path)
         except:
             pass
 
     # =========================
-    # 📊 STATS
+    # ⚙️ OWNER ADMIN PANEL (PRIVATE)
     # =========================
-    @bot.message_handler(func=lambda m: m.text == "📊 Stats")
-    def stats(msg):
-        s = get_stats(token)
-
-        if not s:
-            bot.send_message(msg.chat.id, "No stats yet")
+    @bot.message_handler(commands=['admin'])
+    def admin_panel(msg):
+        if msg.from_user.id != owner_id:
             return
 
+        bot.send_message(
+            msg.chat.id,
+            "⚙️ Owner Panel\n\n"
+            "/broadcast - Send message\n"
+            "/stats - View stats"
+        )
+
+    # =========================
+    # 📊 STATS
+    # =========================
+    @bot.message_handler(commands=['stats'])
+    def stats(msg):
+        if msg.from_user.id != owner_id:
+            return
+
+        s = get_stats(token)
+
         text = (
-            f"📊 Bot Stats\n\n"
-            f"👥 Users: {s.get('users',0)}\n"
-            f"🎬 Videos: {s.get('videos',0)}\n"
-            f"🖼️ Images: {s.get('images',0)}"
+            f"📊 Stats\n\n"
+            f"Users: {s.get('users',0)}\n"
+            f"Videos: {s.get('videos',0)}\n"
+            f"Images: {s.get('images',0)}"
         )
 
         bot.send_message(msg.chat.id, text)
 
     # =========================
-    # ⚙️ OWNER ADMIN PANEL
+    # 📢 BROADCAST
     # =========================
-    @bot.message_handler(func=lambda m: m.text == "⚙️ Admin Panel")
-    def admin_panel(msg):
-        if msg.from_user.id != owner_id:
-            bot.send_message(msg.chat.id, "❌ You are not owner.")
-            return
-
-        markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-        markup.row("📢 Broadcast", "📊 Stats")
-
-        bot.send_message(msg.chat.id, "Owner Panel:", reply_markup=markup)
-
-    # =========================
-    # 📢 BROADCAST (OWNER)
-    # =========================
-    @bot.message_handler(func=lambda m: m.text == "📢 Broadcast")
-    def owner_broadcast(msg):
+    @bot.message_handler(commands=['broadcast'])
+    def broadcast(msg):
         if msg.from_user.id != owner_id:
             return
 
         bot.send_message(msg.chat.id, "Send message:")
-        bot.register_next_step_handler(msg, send_owner_broadcast)
+        bot.register_next_step_handler(msg, send_bc)
 
-    def send_owner_broadcast(msg):
-        users = users_col.find()
+    def send_bc(msg):
+        users = users.find()
 
         for u in users:
             try:
@@ -185,21 +209,19 @@ def start_user_bot(token, owner_id):
             except:
                 pass
 
-        bot.send_message(msg.chat.id, "✅ Broadcast sent.")
+        bot.send_message(msg.chat.id, "✅ Done")
 
     # =========================
-    # ▶️ RUN BOT
+    # ▶️ RUN
     # =========================
     t = threading.Thread(target=bot.infinity_polling)
     t.start()
 
     running_bots[token] = bot
-    print(f"✅ Bot started: {token}")
 
 # =========================
 # ➕ CREATE BOT
 # =========================
-
 def create_bot(user_id, token):
     valid, username = check_token(token)
 
@@ -215,35 +237,19 @@ def create_bot(user_id, token):
     return True, f"✅ Bot created: @{username}"
 
 # =========================
-# 🔴 STOP BOT
-# =========================
-
-def stop_bot(token):
-    bot = running_bots.get(token)
-
-    if bot:
-        try:
-            bot.stop_polling()
-        except:
-            pass
-
-        del running_bots[token]
-        return True
-
-    return False
-
-# =========================
 # 🔴 STOP ALL
 # =========================
-
 def stop_all_bots():
     for token in list(running_bots.keys()):
-        stop_bot(token)
+        try:
+            running_bots[token].stop_polling()
+        except:
+            pass
+        del running_bots[token]
 
 # =========================
 # 🟢 START ALL
 # =========================
-
 def start_all_bots(bots_list):
     for b in bots_list:
         start_user_bot(b["token"], b["owner_id"])
